@@ -33,7 +33,7 @@ module.exports.postHtmlNotification = function(message, color, notify) {
     return api.post('room/' + config.room + '/notification', postData);
 };
 
-module.exports.postMessage = function(message) {
+module.exports.postMessage = function(message, notify) {
 
 };
 

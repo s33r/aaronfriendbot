@@ -1,164 +1,103 @@
-var express = require('express');
-var bodyParser = require('body-parser');
 var q = require('q');
+var events = require("events");
+var minimist = require('minimist');
 
-var config = require('../config.js');
-var webhooks = require('./webhooks.js');
+var apiPoll = require('../sources/apiPoll');
 var room = require('../api/room.js');
-
-
-var listener = express();
-listener.use(bodyParser.json());
-
-
-var server = null;
-
 
 var modules = [
     require('./logger')
 ];
 
-
 var activeModules = [modules[0]];
 
-listener.post('/room/enter', function(request, response) {
-    activeModules.forEach(function(module) {
-        module.onRoomEnter(request.body);
-    });
+var eventEmitter = new events.EventEmitter();
 
-    response.sendStatus(204);
+eventEmitter.addListener('received-message', function (data) {
+    var command = parseCommandMessage(data);
+
+    if(command) {
+        executeCommand(command);
+    }
+
+    activeModules.forEach(function(module) {
+        module.onRoomMessage(data);
+    });
 });
 
-listener.post('/room/exit', function(request, response) {
+eventEmitter.addListener('received-notification', function (data) {
     activeModules.forEach(function(module) {
-        module.onRoomExit(request);
+        module.onRoomNotification(data);
     });
-
-    response.sendStatus(204);
 });
 
-listener.post('/room/message', function(request, response) {
+eventEmitter.addListener('received-enter', function (data) {
     activeModules.forEach(function(module) {
-        module.onRoomMessage(request);
+        module.onRoomEnter(data);
     });
-
-    response.sendStatus(204);
 });
 
-listener.post('/room/notification', function(request, response) {
+eventEmitter.addListener('received-exit', function (data) {
     activeModules.forEach(function(module) {
-        module.onRoomNotification(request);
+        module.onRoomExit(data);
     });
-
-    response.sendStatus(204);
 });
 
-listener.post('/room/topicChange', function(request, response) {
+eventEmitter.addListener('received-topic_change', function (data) {
     activeModules.forEach(function(module) {
-        module.onRoomTopicChange(request);
+        module.onRoomTopicChange(data);
     });
-
-    response.sendStatus(204);
 });
+
+var parseCommandMessage = function(message) {
+    var messageString = message.message;
+
+    if(!(messageString.indexOf('bot:') === 0)) {
+        return null
+    }
+
+    messageString = messageString.replace('bot:', '').trim();
+
+    var arguments = minimist(messageString.split(' '));
+    var name = arguments._.shift();
+
+    console.log('Command: ' + messageString);
+    console.log('arguments: ' + JSON.stringify(arguments, null, '\t'));
+
+    return {
+        commandString: messageString,
+        name: name,
+        arguments: arguments
+    };
+};
+
+var executeCommand = function(command) {
+
+    if(command.name === 'sleep') {
+
+    } else if(command.name === 'wake') {
+
+    } else if(command.name === 'mode') {
+
+    } else if(command.name === 'hello') {
+        room.postTextNotification('Hi! Hi! :^)', 'gray');
+    }
+
+};
 
 module.exports.initialize = function() {
-
-    server = listener.listen(4002, function () {
-
-        var host = server.address().address;
-        var port = server.address().port;
-
-        console.log('aaronfriendbot is at http://%s:%s', host, port);
-    });
-
-    webhooks.createWebhooks().then(
-        function(results) {
-
-        },
-        function(failures) {
-            console.log('Warning, unable to create webhooks. Falling back to polling mode which only supports message and notification hooks.');
-            server.close();
-
-            pollHistory();
-        }
-    );
-
+    apiPoll.initialize(eventEmitter);
 };
 
 module.exports.uninitalize = function() {
-    try {
-        server.close();
-    } catch (exception) {
-        console.log(exception);
-    }
-
-    return webhooks.destroyWebhooks();
-};
-
-var pollHistory = function() {
-    var errorCounter = 0;
-
-    var interval = setInterval(function() {
-        room.listHistory().then(
-            function(data) {
-                parseHistory(data);
-            },
-            function(error) {
-                errorCounter++;
-                console.log(error);
-
-                if(errorCounter > 5) {
-                    console.log('listHistory has failed 5 times, killing interval.');
-                    clearInterval(interval);
-                }
-            }
-        );
-    }, 5000);
+    apiPoll.uninitalize();
 };
 
 
 
-var messageMap = {};
 
-var parseHistory = function(history) {
-    var newMessageQueue = [];
-    var oldMessageQueue = [];
 
-    history.forEach(function(entry) {
-        if(messageMap[entry]){
-            messageMap[entry.id].marked = true;
-        } else {
-            newMessageQueue.push(entry);
-            messageMap[entry.id] = {
-                marked: true,
-                content: entry
-            };
-        }
-    });
 
-    messageMap.forEach(function(entry) {
-        if(!entry.marked) {
-           oldMessageQueue.push(entry);
-        }
-    });
-
-    oldMessageQueue.forEach(function(oldEntry) {
-        delete messageMap[oldEntry.content.id];
-    });
-
-    newMessageQueue.forEach(function(newEntry) {
-        if(newEntry.content.type === 'message') {
-            activeModules.forEach(function(module) {
-                module.onRoomMessage(newEntry.content);
-            });
-        } else if(newEntry.content.type === 'notification') {
-            activeModules.forEach(function(module) {
-                module.onRoomNotification(newEntry.content);
-            });
-        }
-    });
-
-};
 
 
 
